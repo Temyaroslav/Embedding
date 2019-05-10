@@ -8,6 +8,7 @@ import matplotlib as mpl
 mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 
+
 def parallel_map(func, values, args=tuple(), kwargs=dict(),
                  processes=None):
     """

@@ -1,6 +1,15 @@
-from sklearn.neighbors import BallTree
+from pathlib import PurePath, Path
+pp = PurePath(Path.cwd()).parts
+pdir = PurePath(*pp)
+
+import multiprocessing
 
 import numpy as np
+import pandas as pd
+
+from sklearn.neighbors import BallTree
+
+import embedding
 
 
 class KNN:
@@ -89,14 +98,52 @@ class PPMD:
 
         return self.majority(ind[0])
 
-    def error(self, prediction, truth):
+    def error(self, prediction, truth, features):
 
-        assert len(prediction) == len(truth), "Number of predictions much equal the number of real data points."
+        assert len(prediction) == len(truth), "Number of predictions must equal the number of real data points."
 
         error = np.abs(np.array(prediction) - np.array(truth))
-        random_walk = np.abs(np.diff(self.features, axis=0)).sum()
+        random_walk = np.abs(np.diff(features, axis=0)).sum()
 
-        return np.array(error/((len(prediction)/(len(self.features) - 1.0))*random_walk)).sum()
+        return np.array(error/((len(prediction)/(len(features) - 1.0))*random_walk)).sum()
 
+
+class GridSearchTS:
+    def __init__(self, data, dim, tau, grid_params):
+        self.pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+
+        _embedding = embedding.Embedding(data)
+        self.embedded = _embedding.embedding(tau=tau, m=dim)
+
+        # transform to features and labels
+        self.features = [];
+        self.labels = []
+        for i, vector in enumerate(self.embedded):
+            if (i + 1) >= len(self.embedded):
+                break
+            self.features.append(vector)
+            self.labels.append(self.embedded[i + 1])
+
+        self.features = np.array(self.features)
+        self.labels = np.array(self.labels)
+
+        assert isinstance(grid_params, dict), 'grid_params must be dict'
+        self.grid_params = grid_params
+
+    def grid_search(self, func):
+
+        #         parallel_results = parallel_map(self._grid_search, (self.grid_params['n_neighbors'],), processes)
+        #         results += np.array(parallel_results).T.tolist()
+
+        results = self.pool.map(func, self.grid_params['n_neighbors'])
+        self.pool.close()
+
+        return results
+
+    def save_grid_search(self, results, name):
+        # assert isinstance(results, pd.DataFrame), 'Results should be pd.DataFrame() type'
+        results = pd.DataFrame(results)
+        results.to_csv(str(pdir) + "/signals/GridSearch_" + name, index=False)
+        return
 
 

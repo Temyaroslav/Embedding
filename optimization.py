@@ -7,10 +7,8 @@ from pathlib import PurePath, Path
 import numpy as np
 import pandas as pd
 
-from sklearn.model_selection import TimeSeriesSplit
-
 import embedding
-import classifiers
+
 
 pp = PurePath(Path.cwd()).parts
 pdir = PurePath(*pp)
@@ -19,7 +17,7 @@ files = ['eurusd_30m.csv',
          'eurusd_15m.csv',
          'eurusd_5m.csv']
 
-time_delays = np.unique(np.logspace(0, 3, num=100, dtype='int'))
+time_delays = np.unique(np.logspace(0, 2, num=10, dtype='int'))
 dims = np.array(range(2, 10 + 1))
 
 _optimize = embedding.Optimize(time_delays, dims)

@@ -68,7 +68,53 @@ class Embedding:
 
         return ii
 
-    def locmin(self, x, ):
+    def autocorrelation(self, maxtau=None, norm=True, detrend=True):
+        """Return the autocorrelation of the given scalar time series.
+
+        Calculates the autocorrelation of the given scalar time series
+        using the Wiener-Khinchin theorem.
+
+        Parameters
+        ----------
+        x : array_like
+            1-D real time series of length N.
+        maxtau : int, optional (default = N)
+            Return the autocorrelation only up to this time delay.
+        norm : bool, optional (default = True)
+            Normalize the autocorrelation so that it is equal to 1 for
+            zero time delay.
+        detrend: bool, optional (default = True)
+            Subtract the mean from the time series (i.e., a constant
+            detrend).  This is done so that for uncorrelated data, the
+            autocorrelation vanishes for all nonzero time delays.
+
+        Returns
+        -------
+        r : array
+            Array with the autocorrelation up to maxtau.
+        """
+        x = np.asarray(self.data)
+        N = len(self.data)
+
+        if not maxtau:
+            maxtau = N
+        else:
+            maxtau = min(N, maxtau)
+
+        if detrend:
+            x = x - np.mean(x)
+
+        # We have to zero pad the data to give it a length 2N - 1.
+        # See: http://dsp.stackexchange.com/q/1919
+        y = np.fft.fft(x, 2 * N - 1)
+        r = np.real(np.fft.ifft(y * y.conj(), 2 * N - 1))
+
+        if norm:
+            return r[:maxtau] / r[0]
+        else:
+            return r[:maxtau]
+
+    def locmin(self, x):
         """
         fn: All local minimas of an array
         :param x: 1D array
@@ -163,6 +209,82 @@ class Embedding:
         f3 = f1 | f2
 
         return np.mean(f1), np.mean(f2), np.mean(f3)
+        # return np.mean(f1), np.mean(f2)
+
+    def afn(self, x, dim=[1], tau=1, metric='chebyshev', window=10, maxnum=None,
+            parallel=True):
+        """Averaged false neighbors algorithm.
+
+        This function implements the averaged false neighbors method
+        described by Cao (1997) to estimate the minimum embedding dimension
+        required to embed a scalar time series.
+
+        Parameters
+        ----------
+        x : array
+            1-D scalar time series.
+        dim : int array (default = [1])
+            Embedding dimensions for which E(d) and E^*(d) should be
+            computed.
+        tau : int, optional (default = 1)
+            Time delay.
+        metric : string, optional (default = 'chebyshev')
+            Metric to use for distance computation.  Must be one of
+            "cityblock" (aka the Manhattan metric), "chebyshev" (aka the
+            maximum norm metric), or "euclidean".
+        window : int, optional (default = 10)
+            Minimum temporal separation (Theiler window) that should exist
+            between near neighbors.
+        maxnum : int, optional (default = None (optimum))
+            Maximum number of near neighbors that should be found for each
+            point.  In rare cases, when there are no neighbors that are at a
+            nonzero distance, this will have to be increased (i.e., beyond
+            2 * window + 3).
+        parallel : bool, optional (default = True)
+            Calculate E(d) and E^*(d) for each d in parallel.
+
+        Returns
+        -------
+        E : array
+            E(d) for each of the d's.
+        Es : array
+            E^*(d) for each of the d's.
+        """
+        if parallel:
+            processes = None
+        else:
+            processes = 1
+
+        return utils.parallel_map(self._afn, dim, (x,), {
+            'tau': tau,
+            'metric': metric,
+            'window': window,
+            'maxnum': maxnum
+        }, processes).T
+
+    def _afn(self, d, x, tau=1, metric='chebyshev', window=10, maxnum=None):
+        """Return E(d) and E^*(d) for a single d.
+
+        Returns E(d) and E^*(d) for the AFN method for a single d.  This
+        function is meant to be called from the main afn() function.  See
+        the docstring of afn( for more.)
+        """
+        # We need to reduce the number of points in dimension d by tau
+        # so that after reconstruction, there'll be equal number of points
+        # at both dimension d as well as dimension d + 1.
+        y1 = self._reconstruct(x[:-tau], d, tau)
+        y2 = self._reconstruct(x, d + 1, tau)
+
+        # Find near neighbors in dimension d.
+        index, dist = self._neighbors(y1, metric=metric, window=window,
+                                      maxnum=maxnum)
+
+        # Compute the magnification and the increase in the near-neighbor
+        # distances and return the averages.
+        E = self._dist(y2, y2[index], metric=metric) / dist
+        Es = np.abs(y2[:, -1] - y2[index, -1])
+
+        return np.mean(E), np.mean(Es)
 
     def _dist(self, x, y, metric='chebyshev'):
         """
@@ -304,13 +426,24 @@ class Embedding:
         plt.show()
 
     def plot_fnn(self, dim, f1, f2, f3):
-        plt.title(r'FNN for Ccy pair')
-        plt.xlabel(r'Embedding dimension $d$')
+        plt.title(r'Ближайший ложный сосед (FNN)')
+        plt.xlabel(r'Размерность вложения $d$')
         plt.ylabel(r'FNN (%)')
-        plt.plot(dim, 100 * f1, 'bo--', label=r'Test I')
-        plt.plot(dim, 100 * f2, 'g^--', label=r'Test II')
-        plt.plot(dim, 100 * f3, 'rs-', label=r'Test I + II')
+        plt.plot(dim, 100 * f1, 'bo--', label=r'Критерий I')
+        plt.plot(dim, 100 * f2, 'g^--', c='g', label=r'Критерий II')
+        plt.plot(dim, 100 * f3, 'rs-', label=r'Критерии I + II')
         plt.axhline(y=10, color='k', linestyle='dashed')
+        plt.legend()
+
+        plt.show()
+
+    def plot_afn(self, dim, E1, E2):
+        plt.title(r'Средний ложный сосед (AFN)')
+        plt.xlabel(r'Размерность вложения $d$')
+        plt.ylabel(r'$E_1(d)$ и $E_2(d)$')
+        plt.plot(dim[:-1], E1, 'bo-', label=r'$E_1(d)$')
+        plt.plot(dim[:-1], E2, 'go-', c='r', label=r'$E_2(d)$')
+        plt.axhline(y=1.0, color='k', linestyle='dashed')
         plt.legend()
 
         plt.show()
@@ -336,7 +469,7 @@ class Optimize:
         return results
 
     def _brute_force(self, d, x, tau=1):
-        features = [];
+        features = []
         labels = []
         _embedding = Embedding(x)
         embedded = _embedding.embedding(tau=tau, m=d)
@@ -351,6 +484,7 @@ class Optimize:
         labels = np.array(labels)
 
         error_train, error_validation = [], []
+        sign_train, sign_validation = [], []
 
         for train_index, validation_index in self.tscv.split(features):
             X_train, X_validation = features[train_index], features[validation_index]
@@ -358,33 +492,49 @@ class Optimize:
 
             ppmd = classifiers.PPMD(X_train, y_train)
 
+            # Predicting test
             prediction = []
             truth = []
+            s = 0
             for i in range(len(X_train)):
                 pred = ppmd.classify(X_train[i])
                 prediction.append(pred)
                 truth.append(y_train[i])
 
-            error_train.append(ppmd.error(prediction, truth))
+                if np.sign(np.median(pred) - np.median(X_train[i])) == np.sign(
+                        np.median(y_train[i]) - np.median(X_train[i])):
+                    s += 1
 
-            ppmd = classifiers.PPMD(X_validation, y_validation)
+            sign_train.append(s / len(prediction))
+            error_train.append(ppmd.error(prediction, truth, ppmd.features))
 
+            # Predicting validation
             prediction = []
             truth = []
+            s = 0
             for i in range(len(X_validation)):
                 pred = ppmd.classify(X_validation[i])
                 prediction.append(pred)
                 truth.append(y_validation[i])
 
-            error_validation.append(ppmd.error(prediction, truth))
+                if np.sign(np.median(pred) - np.median(X_validation[i])) == np.sign(
+                        np.median(y_validation[i]) - np.median(X_validation[i])):
+                    s += 1
 
+            sign_validation.append(s / len(prediction))
+            error_validation.append(ppmd.error(prediction, truth, X_validation))
+
+        sign_train = np.average(np.array(sign_train))
+        sign_validation = np.average(np.array((sign_validation)))
         error_train = np.average(np.array(error_train))
         error_validation = np.average(np.array(error_validation))
 
         temp_dict = {'dimension': d,
                      'delay': tau,
                      'MASE_train': error_train,
-                     'MASE_validation': error_validation}
+                     'MASE_validation': error_validation,
+                     'SIGN_train': sign_train,
+                     'SIGN_validation': sign_validation}
 
         print('For dimension = {0} and delay = {1} Errors on TRAIN = {2}, VALIDATE = {3}'
               .format(d, tau, error_train, error_validation))

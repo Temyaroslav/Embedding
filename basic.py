@@ -20,16 +20,16 @@ mids = ((bid.iloc[:, 1] + ask.iloc[:, 1]) / 2).dropna()
 
 _embedding = embedding.Embedding(mids)
 time_delayed_mi = _embedding.time_delayed_mutual_information()
-_embedding.plot_mutual_information(time_delayed_mi)
+# _embedding.plot_mutual_information(time_delayed_mi)
 
 # First minima of time-delayed mutual information
 time_delay = _embedding.locmin(time_delayed_mi)[0]
-_embedding.plot_delayed_series(tau=time_delay)
+# _embedding.plot_delayed_series(tau=time_delay)
 
 # Calculate FNN in the range of 10 dimensions. Takes some time to calculate!
-dim = np.arange(1, 10 + 1)
-f1, f2, f3 = _embedding.fnn(mids.values, dim=dim, tau=time_delay, window=10, metric='cityblock')
-_embedding.plot_fnn(dim, f1, f2, f3)
+# dim = np.arange(1, 10 + 1)
+# f1, f2, f3 = _embedding.fnn(mids.values, dim=dim, tau=time_delay, window=10, metric='cityblock')
+# _embedding.plot_fnn(dim, f1, f2, f3)
 
 # judging from the plot above FNN goes beyond 10% in dim=4
 
