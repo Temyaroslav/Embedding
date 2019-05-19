@@ -4,88 +4,34 @@ pdir = PurePath(*pp)
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
-from sklearn.model_selection import TimeSeriesSplit
-
-from classifiers import PPMD
-from classifiers import GridSearchTS
+from embedding import Embedding
 
 
-def _grid_search(k):
-    temp_dict = []
-    for metric in grid_params['metric']:
-        error_train, error_validation = [], []
-        sign_train, sign_validation = [], []
-        for train_index, validation_index in tscv.split(gs.features):
-            X_train, X_validation = gs.features[train_index], gs.features[validation_index]
-            y_train, y_validation = gs.labels[train_index], gs.labels[validation_index]
+def dimension_fnn(x):
+    _embedding = Embedding(x)
 
-            ppmd = PPMD(X_train, y_train, k=k, metric=metric)
+    dim = np.arange(1, 20 + 1)
+    f1, f2, f3 = _embedding.fnn(x, tau=14, dim=dim, window=10, metric='cityblock')
+    _embedding.plot_fnn(dim, f1, f2, f3)
 
-            prediction = [];
-            truth = [];
-            s = 0
-            print('Calculating for TRAIN:\n')
-            for i in tqdm(range(len(X_train))):
-                pred = ppmd.classify(X_train[i])
-                prediction.append(pred)
-                truth.append(y_train[i])
 
-                if np.sign(np.median(pred) - np.median(X_train[i])) == np.sign(
-                        np.median(y_train[i]) - np.median(X_train[i])):
-                    s += 1
+def dimension_afn(x):
+    _embedding = Embedding(x)
 
-            sign_train.append(s / len(prediction))
-            error_train.append(ppmd.error(prediction, truth))
-
-            print('Calculating for VALIDATION:\n')
-            prediction = [];
-            truth = [];
-            s = 0
-            for i in tqdm(range(len(X_validation))):
-                pred = ppmd.classify(X_validation[i])
-                prediction.append(pred)
-                truth.append(y_validation[i])
-
-                if np.sign(np.median(pred) - np.median(X_validation[i])) == np.sign(
-                        np.median(y_validation[i]) - np.median(X_validation[i])):
-                    s += 1
-
-            sign_validation.append(s / len(prediction))
-            error_validation.append(ppmd.error(prediction, truth))
-
-        error_train = np.average(np.array(error_train))
-        error_validation = np.average(np.array(error_validation))
-        sign_train = np.average(np.array(sign_train))
-        sign_validation = np.average(np.array(sign_validation))
-
-        d = {'neighbors': k,
-             'metric': metric,
-             'MASE_train': error_train,
-             'MASE_validation': error_validation,
-             'SIGN_train': sign_train,
-             'SIGN_validation': sign_validation}
-
-        temp_dict.append(d)
-
-    return temp_dict
+    dim = np.arange(1, 20 + 2)
+    E, Es = _embedding.afn(x, tau=138, dim=dim, window=45, metric='chebyshev')
+    E1, E2 = E[1:] / E[:-1], Es[1:] / Es[:-1]
+    _embedding.plot_afn(dim, E1, E2)
 
 
 if __name__ == '__main__':
-    data = pd.read_csv(str(pdir) + '/data/eurusd_5m.csv')
+    data = pd.read_csv(str(pdir) + '/data/eurusd_30m.csv')
     mids = ((data.bid_close + data.ask_close) / 2).dropna()
-    data = mids.iloc[: int(0.8 * len(mids))]
+    data = mids.iloc[: int(0.8 * len(mids))]  # excluding hold-out
 
-    grid_params = {'n_neighbors': list(np.linspace(2, 10, 9, dtype=int)),
-                    # 'weights': ['uniform', 'distance'],
-                    'metric': ['euclidean', 'manhattan', 'minkowski']
-    }
-    tscv = TimeSeriesSplit(n_splits=3)
+    test = mids.iloc[int(0.8 * len(mids)):]
+    validate = mids.iloc[int(0.6 * len(mids)):int(0.8 * len(mids))]
+    train = mids.iloc[:int(0.6 * len(mids))]
 
-    # Using dim and tau from brute_force optimization
-    gs = GridSearchTS(data, dim=4, tau=1, grid_params=grid_params)
-    res = gs.grid_search(_grid_search)
-
-    gs.save_grid_search(res, 'KNN.csv')
-
+    dimension_afn(train.values)
